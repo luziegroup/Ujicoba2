@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+.btn-primary {
+  background: #1B2430;
+  color: #fff;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: transform .1s ease, opacity .15s ease;
+}
+.btn-primary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.btn-primary:not(:disabled):hover {
+  transform: translateY(-1px);
+}
