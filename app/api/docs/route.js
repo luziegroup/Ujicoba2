@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import { generateQuiz, fallbackQuiz } from "@/lib/generateQuiz";
+import { formatDocumentHtml, fallbackFormatHtml } from "@/lib/formatContent";
 import { isHrAuthed } from "@/lib/checkHrAuth";
 
 export const dynamic = "force-dynamic";
@@ -28,11 +29,21 @@ export async function POST(req) {
   }
 
   let quiz;
+  let htmlContent;
   try {
-    quiz = await generateQuiz(title, content);
+    [quiz, htmlContent] = await Promise.all([
+      generateQuiz(title, content).catch((e) => {
+        console.error("AI quiz generation failed:", e.message);
+        return fallbackQuiz();
+      }),
+      formatDocumentHtml(title, content).catch((e) => {
+        console.error("AI format failed:", e.message);
+        return fallbackFormatHtml(content);
+      }),
+    ]);
   } catch (e) {
-    console.error("AI quiz generation failed:", e.message);
     quiz = fallbackQuiz();
+    htmlContent = fallbackFormatHtml(content);
   }
 
   const id = "mom_" + Math.random().toString(36).slice(2, 10);
@@ -41,7 +52,6 @@ export async function POST(req) {
     month: "long",
     year: "numeric",
   });
-  const htmlContent = `<h3>Isi Dokumen</h3><p>${escapeHtml(content).replace(/\n/g, "</p><p>")}</p>`;
 
   try {
     const pool = getPool();
