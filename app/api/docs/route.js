@@ -23,27 +23,41 @@ export async function POST(req) {
     return NextResponse.json({ error: "Tidak diizinkan. Silakan login HR dulu." }, { status: 401 });
   }
 
-  const { title, content, passThreshold } = await req.json();
+  const { title, content, passThreshold, manualQuiz } = await req.json();
   if (!title || !content) {
     return NextResponse.json({ error: "Judul dan isi dokumen wajib diisi" }, { status: 400 });
   }
 
   let quiz;
   let htmlContent;
-  try {
-    [quiz, htmlContent] = await Promise.all([
-      generateQuiz(title, content).catch((e) => {
-        console.error("AI quiz generation failed:", e.message);
-        return fallbackQuiz();
-      }),
-      formatDocumentHtml(title, content).catch((e) => {
-        console.error("AI format failed:", e.message);
-        return fallbackFormatHtml(content);
-      }),
-    ]);
-  } catch (e) {
-    quiz = fallbackQuiz();
-    htmlContent = fallbackFormatHtml(content);
+  let summary;
+
+  if (manualQuiz && Array.isArray(manualQuiz) && manualQuiz.length > 0) {
+    quiz = manualQuiz;
+    summary = "Dokumen sosialisasi, kuis ditulis manual oleh HR.";
+    try {
+      htmlContent = await formatDocumentHtml(title, content);
+    } catch (e) {
+      console.error("AI format failed:", e.message);
+      htmlContent = fallbackFormatHtml(content);
+    }
+  } else {
+    summary = "Dokumen sosialisasi, kuis dibuat otomatis oleh AI.";
+    try {
+      [quiz, htmlContent] = await Promise.all([
+        generateQuiz(title, content).catch((e) => {
+          console.error("AI quiz generation failed:", e.message);
+          return fallbackQuiz();
+        }),
+        formatDocumentHtml(title, content).catch((e) => {
+          console.error("AI format failed:", e.message);
+          return fallbackFormatHtml(content);
+        }),
+      ]);
+    } catch (e) {
+      quiz = fallbackQuiz();
+      htmlContent = fallbackFormatHtml(content);
+    }
   }
 
   const id = "mom_" + Math.random().toString(36).slice(2, 10);
@@ -62,7 +76,7 @@ export async function POST(req) {
         id,
         title,
         docDate,
-        "Dokumen sosialisasi, kuis dibuat otomatis oleh AI.",
+        summary,
         htmlContent,
         JSON.stringify(quiz),
         passThreshold ?? 0.7,
