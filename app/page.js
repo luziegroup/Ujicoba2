@@ -290,6 +290,17 @@ function ReaderQuiz({ doc, employeeName, view, lastResult, onBack, onResult }) {
         </div>
       )}
 
+      {doc.original_link && (
+        <a
+          href={doc.original_link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-golddeep border border-[#E9DEC0] bg-[#FBF8F1] rounded-lg px-3.5 py-2 mt-3.5"
+        >
+          📄 Lihat dokumen asli (buka di tab baru)
+        </a>
+      )}
+
       <div
         onScroll={handleScroll}
         className="max-h-[340px] overflow-y-auto border border-line rounded-lg px-5 py-5 bg-[#FCFCFD] leading-relaxed text-[14.5px] mt-4"
@@ -404,6 +415,7 @@ function HrDashboard() {
   const [receipts, setReceipts] = useState([]);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [originalLink, setOriginalLink] = useState("");
   const [threshold, setThreshold] = useState("0.7");
   const [creating, setCreating] = useState(false);
   const [fileStatus, setFileStatus] = useState("");
@@ -464,6 +476,10 @@ function HrDashboard() {
   async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setFileStatus("File terlalu besar (maksimal 10MB). Coba kompres/foto ulang dengan resolusi lebih kecil.");
+      return;
+    }
     setFileStatus(`Mengekstrak teks dari ${file.name}…`);
     try {
       let text = "";
@@ -483,11 +499,22 @@ function HrDashboard() {
           const csv = window.XLSX.utils.sheet_to_csv(wb.Sheets[sn]);
           if (csv.trim()) text += `Sheet: ${sn}\n${csv.trim()}\n\n`;
         });
+      } else if (/\.(jpg|jpeg|png|webp)$/.test(name)) {
+        setFileStatus(`Membaca foto ${file.name} dengan AI, mohon tunggu…`);
+        const base64 = await fileToBase64(file);
+        const res = await fetch("/api/extract-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: base64, mimeType: file.type || "image/jpeg" }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Gagal membaca foto");
+        text = data.text;
       } else {
-        throw new Error("Format tidak didukung. Gunakan PDF, XLSX, XLS, atau CSV.");
+        throw new Error("Format tidak didukung. Gunakan PDF, XLSX, XLS, CSV, JPG, PNG, atau WEBP.");
       }
       setContent(text.trim());
-      if (!title.trim()) setTitle(file.name.replace(/\.(pdf|xlsx|xls|csv)$/i, ""));
+      if (!title.trim()) setTitle(file.name.replace(/\.(pdf|xlsx|xls|csv|jpg|jpeg|png|webp)$/i, ""));
       setFileStatus(`Berhasil mengambil isi dari ${file.name}. Silakan periksa/edit sebelum membuat dokumen.`);
     } catch (err) {
       setFileStatus("Gagal membaca file: " + err.message);
@@ -501,7 +528,7 @@ function HrDashboard() {
       return;
     }
 
-    let payload = { title, content, passThreshold: parseFloat(threshold) };
+    let payload = { title, content, passThreshold: parseFloat(threshold), originalLink: originalLink.trim() || null };
 
     if (quizMode === "manual") {
       for (const q of manualQuiz) {
@@ -527,6 +554,7 @@ function HrDashboard() {
     }
     setTitle("");
     setContent("");
+    setOriginalLink("");
     setFileStatus("");
     setManualQuiz([emptyManualQ()]);
     loadDocs();
@@ -546,12 +574,21 @@ function HrDashboard() {
         <label className="text-[12.5px] font-semibold text-inksoft block mb-1.5">Judul dokumen</label>
         <input className="w-full border border-line rounded-lg px-3 py-2.5 text-sm" placeholder="Contoh: Sosialisasi SOP Lembur 2026" value={title} onChange={(e) => setTitle(e.target.value)} />
 
-        <label className="text-[12.5px] font-semibold text-inksoft block mt-3.5 mb-1.5">Unggah file (opsional) — PDF, Excel, atau CSV</label>
-        <input type="file" accept=".pdf,.xlsx,.xls,.csv" onChange={handleFile} className="text-sm" />
+        <label className="text-[12.5px] font-semibold text-inksoft block mt-3.5 mb-1.5">Unggah file (opsional) — PDF, Excel, CSV, atau foto (JPG/PNG)</label>
+        <input type="file" accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp" onChange={handleFile} className="text-sm" />
         {fileStatus && <div className="text-[11.5px] text-[#8A93A3] mt-1">{fileStatus}</div>}
 
         <label className="text-[12.5px] font-semibold text-inksoft block mt-3.5 mb-1.5">Isi ringkas</label>
         <textarea className="w-full border border-line rounded-lg px-3 py-2.5 text-sm min-h-[110px]" placeholder="Tuliskan isi pengumuman/kebijakan di sini, atau unggah file di atas…" value={content} onChange={(e) => setContent(e.target.value)} />
+
+        <label className="text-[12.5px] font-semibold text-inksoft block mt-3.5 mb-1.5">Link dokumen asli (opsional)</label>
+        <input
+          className="w-full border border-line rounded-lg px-3 py-2.5 text-sm"
+          placeholder="https://drive.google.com/... — kalau ingin karyawan bisa lihat file aslinya"
+          value={originalLink}
+          onChange={(e) => setOriginalLink(e.target.value)}
+        />
+        <div className="text-[11.5px] text-[#8A93A3] mt-1">Upload dulu file aslinya ke Google Drive (atau tempat lain), lalu tempel link-nya di sini. Isi ringkas di atas cukup ditulis singkat oleh HR — tidak perlu menyalin seluruh isi dokumen.</div>
 
         <label className="text-[12.5px] font-semibold text-inksoft block mt-3.5 mb-1.5">Skor minimal untuk lulus</label>
         <select className="w-full border border-line rounded-lg px-3 py-2.5 text-sm bg-white" value={threshold} onChange={(e) => setThreshold(e.target.value)}>
@@ -703,4 +740,15 @@ function Stat({ num, label, mono }) {
       <div className="text-[11.5px] text-inksoft mt-0.5">{label}</div>
     </div>
   );
+}
+
+// Ubah file gambar jadi base64 murni (tanpa prefix "data:image/...;base64,")
+// supaya bisa dikirim ke API route untuk dibaca oleh Gemini Vision.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
