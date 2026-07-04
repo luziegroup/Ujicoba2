@@ -408,6 +408,10 @@ function HrDashboard() {
   const [creating, setCreating] = useState(false);
   const [fileStatus, setFileStatus] = useState("");
   const [formError, setFormError] = useState("");
+  const [quizMode, setQuizMode] = useState("ai"); // "ai" | "manual"
+  const emptyManualQ = () => ({ q: "", options: ["", "", "", ""], answer: 0 });
+  const [manualQuiz, setManualQuiz] = useState([emptyManualQ()]);
+  const [deletingId, setDeletingId] = useState(null);
 
   function loadDocs() {
     fetch("/api/docs").then((r) => r.json()).then((d) => {
@@ -422,6 +426,40 @@ function HrDashboard() {
     if (!dashDocId) return;
     fetch(`/api/docs/${dashDocId}/receipts`).then((r) => r.json()).then((d) => setReceipts(d.receipts || []));
   }, [dashDocId]);
+
+  async function deleteDoc(id, docTitle) {
+    if (!confirm(`Hapus dokumen "${docTitle}"? Semua riwayat konfirmasi karyawan untuk dokumen ini juga akan ikut terhapus. Tindakan ini tidak bisa dibatalkan.`)) {
+      return;
+    }
+    setDeletingId(id);
+    const res = await fetch(`/api/docs/${id}`, { method: "DELETE" });
+    setDeletingId(null);
+    if (res.ok) {
+      if (dashDocId === id) setDashDocId(null);
+      loadDocs();
+    } else {
+      alert("Gagal menghapus dokumen.");
+    }
+  }
+
+  function addManualQuestion() {
+    setManualQuiz([...manualQuiz, emptyManualQ()]);
+  }
+  function removeManualQuestion(idx) {
+    setManualQuiz(manualQuiz.filter((_, i) => i !== idx));
+  }
+  function updateManualQ(idx, field, value) {
+    const copy = [...manualQuiz];
+    copy[idx] = { ...copy[idx], [field]: value };
+    setManualQuiz(copy);
+  }
+  function updateManualOption(qIdx, oIdx, value) {
+    const copy = [...manualQuiz];
+    const opts = [...copy[qIdx].options];
+    opts[oIdx] = value;
+    copy[qIdx] = { ...copy[qIdx], options: opts };
+    setManualQuiz(copy);
+  }
 
   async function handleFile(e) {
     const file = e.target.files[0];
@@ -462,11 +500,24 @@ function HrDashboard() {
       setFormError("Judul dan isi dokumen wajib diisi.");
       return;
     }
+
+    let payload = { title, content, passThreshold: parseFloat(threshold) };
+
+    if (quizMode === "manual") {
+      for (const q of manualQuiz) {
+        if (!q.q.trim() || q.options.some((o) => !o.trim())) {
+          setFormError("Setiap pertanyaan manual dan ke-4 opsinya wajib diisi.");
+          return;
+        }
+      }
+      payload.manualQuiz = manualQuiz;
+    }
+
     setCreating(true);
     const res = await fetch("/api/docs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content, passThreshold: parseFloat(threshold) }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     setCreating(false);
@@ -477,6 +528,7 @@ function HrDashboard() {
     setTitle("");
     setContent("");
     setFileStatus("");
+    setManualQuiz([emptyManualQ()]);
     loadDocs();
     setDashDocId(data.doc.id);
   }
@@ -507,26 +559,98 @@ function HrDashboard() {
           <option value="0.7">70% — cukup toleran</option>
           <option value="0.5">50% — longgar</option>
         </select>
-        <div className="text-[11.5px] text-[#8A93A3] mt-1">Kuis dibuat otomatis oleh AI berdasarkan isi dokumen di atas.</div>
+
+        <label className="text-[12.5px] font-semibold text-inksoft block mt-3.5 mb-1.5">Sumber pertanyaan kuis</label>
+        <div className="flex gap-2 mb-2">
+          <button
+            type="button"
+            onClick={() => setQuizMode("ai")}
+            className={`flex-1 border rounded-lg px-3 py-2 text-xs font-semibold ${quizMode === "ai" ? "bg-ink text-white border-ink" : "border-line text-inksoft bg-white"}`}
+          >
+            Otomatis oleh AI
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuizMode("manual")}
+            className={`flex-1 border rounded-lg px-3 py-2 text-xs font-semibold ${quizMode === "manual" ? "bg-ink text-white border-ink" : "border-line text-inksoft bg-white"}`}
+          >
+            Saya tulis sendiri
+          </button>
+        </div>
+
+        {quizMode === "ai" ? (
+          <div className="text-[11.5px] text-[#8A93A3] mt-1">Kuis dibuat otomatis oleh AI berdasarkan isi dokumen di atas. Kalau AI gagal/tidak tersedia, sistem otomatis memakai kuis cadangan sederhana.</div>
+        ) : (
+          <div className="border border-line rounded-lg p-3.5 mt-2 bg-[#FCFCFD]">
+            {manualQuiz.map((q, qi) => (
+              <div key={qi} className="mb-4 pb-4 border-b border-line last:border-b-0 last:mb-0 last:pb-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[12.5px] font-semibold text-inksoft">Pertanyaan {qi + 1}</label>
+                  {manualQuiz.length > 1 && (
+                    <button type="button" onClick={() => removeManualQuestion(qi)} className="text-[11px] text-rust font-semibold">Hapus</button>
+                  )}
+                </div>
+                <input
+                  className="w-full border border-line rounded-lg px-3 py-2 text-sm mb-2"
+                  placeholder="Tulis pertanyaan di sini"
+                  value={q.q}
+                  onChange={(e) => updateManualQ(qi, "q", e.target.value)}
+                />
+                <div className="text-[11px] text-inksoft mb-1">Pilih jawaban yang benar (klik radio-nya), isi ke-4 opsi:</div>
+                {q.options.map((opt, oi) => (
+                  <div key={oi} className="flex items-center gap-2 mb-1.5">
+                    <input
+                      type="radio"
+                      name={`manual-correct-${qi}`}
+                      checked={q.answer === oi}
+                      onChange={() => updateManualQ(qi, "answer", oi)}
+                    />
+                    <input
+                      className="flex-1 border border-line rounded-lg px-3 py-1.5 text-sm"
+                      placeholder={`Opsi ${oi + 1}`}
+                      value={opt}
+                      onChange={(e) => updateManualOption(qi, oi, e.target.value)}
+                    />
+                  </div>
+                ))}
+              </div>
+            ))}
+            <button type="button" onClick={addManualQuestion} className="text-[12px] font-semibold text-golddeep">+ Tambah pertanyaan</button>
+          </div>
+        )}
+
         {formError && <div className="text-rust text-xs mt-2">{formError}</div>}
         <button className="btn-primary mt-3.5" disabled={creating} onClick={createDoc}>
-          {creating ? "Menyusun kuis…" : "Buat & Hasilkan Kuis Otomatis"}
+          {creating ? (quizMode === "ai" ? "Menyusun kuis…" : "Menyimpan…") : "Buat Dokumen"}
         </button>
       </Card>
 
       <Card>
         <div className="text-[11px] font-mono uppercase tracking-wide text-golddeep mb-2">Dashboard Konfirmasi</div>
         <h1 className="font-serif font-semibold text-2xl mb-4">Status pembacaan per dokumen</h1>
-        <div className="flex gap-2 flex-wrap mb-4">
+        <div className="flex flex-col gap-2 mb-4">
           {docs.map((d) => (
-            <button
+            <div
               key={d.id}
-              onClick={() => setDashDocId(d.id)}
-              className={`border rounded-full px-3.5 py-1.5 text-xs font-semibold ${d.id === dashDocId ? "bg-ink text-white border-ink" : "border-line text-inksoft bg-white"}`}
+              className={`flex items-center justify-between border rounded-lg px-3 py-2 ${d.id === dashDocId ? "border-ink bg-[#F5F6F8]" : "border-line"}`}
             >
-              {d.title}
-            </button>
+              <button
+                onClick={() => setDashDocId(d.id)}
+                className={`text-left flex-1 text-xs font-semibold ${d.id === dashDocId ? "text-ink" : "text-inksoft"}`}
+              >
+                {d.title}
+              </button>
+              <button
+                onClick={() => deleteDoc(d.id, d.title)}
+                disabled={deletingId === d.id}
+                className="text-[11px] text-rust font-semibold ml-2 disabled:opacity-40"
+                title="Hapus dokumen ini"
+              >
+                {deletingId === d.id ? "Menghapus…" : "Hapus"}
+              </button>
+            </div>
           ))}
+          {docs.length === 0 && <div className="text-center text-inksoft text-sm py-4">Belum ada dokumen.</div>}
         </div>
 
         {activeDoc ? (
